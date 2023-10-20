@@ -40,8 +40,9 @@ def get_time_indices(tstart, tend, tm):
     ite : 'int'
         Index corresponding to tend.
     """
-    its = min(min(np.where(tm > tstart)))
-    ite = max(max(np.where(tm < tend)))
+    indices = np.where((tm > tstart) & (tm < tend))[0]
+    its = indices[0]
+    ite = indices[-1]
     return its, ite
     
 
@@ -391,7 +392,7 @@ def MX_stats(tB, B, tV, V, shock_time, up_shk, dw_shk, min_up_dur, max_up_dur, m
 
             iw = iw +1
 
-        print('Upstream windows = ' + str(i) + ' / ' + str(sldu))
+        print('Upstream windows = ' + str(i+1) + ' / ' + str(sldu), end='\r')
         
     ex.tbn_luld = tbn.MX3[iw-1]  # Smallest Upstream Smallest Downstream
     ex.rB_luld  = rB[iw-1]   # Smallest Upstream Smallest Downstream
@@ -498,7 +499,7 @@ def Vsh_stats(n, tP, V, Rho, shock_time, up_shk, dw_shk, min_up_dur, max_up_dur,
                 
             iw = iw +1
 
-        print('Upstream windows = ' + str(i) + ' / ' + str(sldu))
+        print('Upstream windows = ' + str(i+1) + ' / ' + str(sldu), end='\r')
         
     ex.vshmax = vsh[iw-1]  # Smallest Upstream Smallest Downstream
     
@@ -595,7 +596,7 @@ def rgas_stats(trho, Rho, shock_time, up_shk, dw_shk, min_up_dur, max_up_dur, mi
                 
             iw = iw +1
 
-        print('Upstream windows = ' + str(i) + ' / ' + str(sldu))
+        print('Upstream windows = ' + str(i+1) + ' / ' + str(sldu), end='\r')
         
     ex.r_max = r[iw-1]  # Smallest Upstream Smallest Downstream
     
@@ -744,3 +745,182 @@ def create_ranki_stream(Bx1,Bx2,By1,By2,Vx1,Vx2,Vy1,Vy2,rho1,rho2,nts, mode, noi
     return B,V,rho
 
 
+def window_parameters(start_time_up,end_time_up,start_time_down,end_time_down,min_dur_up,min_dur_down,cadence):
+    """
+    Determine the limits of the upstream and downstream windows, smallest and largest.
+
+    Parameters
+    ----------
+    end_time_up : 'datetime'
+        End of the upstream window (limit nearest to the shock).
+    start_time_down : 'datetime'
+        Start of the downstream window (limit nearest to the shock).
+    max_dur_down : 'timedelta'
+        Duration of the largest downstream averaging window.
+    min_dur_down : 'timedelta'
+        Duration of the smallest downstream averaging window.
+    cadence : 'timedelta'
+        Cadence by which the window lengths are increased (should be larger than the data cadence).
+
+    Returns
+    -------
+    max_dur_up : 'timedelta'
+        Duration of the largest upstream averaging window.
+    min_dur_up : 'timedelta'
+        Duration of the smallest upstream averaging window.
+    stut_min : 'datetime'
+        Minimum limit of the upstream window.
+    stut_max : 'datetime'
+        Maximum limit of the upstream window.
+    endt_min : 'datetime'
+        Minimum limit of the downstream window.
+    endt_max : 'datetime'
+        Maximum limit of the downstream window.
+
+    """
+    max_dur_up = end_time_up - start_time_up
+    max_dur_down = end_time_down - start_time_down
+    sldu = int(np.floor((max_dur_up-min_dur_up)/cadence)) 
+    sldd = int(np.floor((max_dur_down-min_dur_down)/cadence))
+    stut_min = end_time_up - min_dur_up - 0*cadence
+    stut_max = end_time_up - min_dur_up - sldu*cadence
+    endt_min = start_time_down + min_dur_down + 0*cadence
+    endt_max = start_time_down + min_dur_down + sldd*cadence
+    
+    return stut_min, stut_max, endt_min, endt_max, max_dur_up, max_dur_down
+
+def all_parameters(tB, B, tV, V, tn, n, tbeta, beta, shock_time, up_shk, dw_shk, min_up_dur, max_up_dur, min_dw_dur, max_dw_dur, tcad, method='cross'):
+    """
+    Routine computing shock normal vector, theta_bn and magnetic compression ratio 
+    for an ensemble of upstream/downstream averaging windows, that are systematically changed.
+    This methods returns all the parameters for each pair of upstream and downstream windows so that these parameters
+    remain connected to each other.
+    
+    Parameters
+    ----------
+    tB : 'DatetimeIndex'
+        Stream of times for magnetic field measurements.
+    B : 'numpy array'
+        Magnetic field measurements with n_timestamps x 3 dimensions.
+    tV : 'DatetimeIndex'
+        Stream of times for bulk flow speed measurements.
+    V : 'numpy array'
+        Bulk flow speed measurements with n_timestamps x 3 dimensions.
+    tn : 'DatetimeIndex'
+        Stream of times for number density measurements.
+    n : 'numpy array'
+        Number density measurements.
+    shock_time : 'datetime'
+        Time of the shock crossing
+    up_shk : 'datetime'
+        Beginning of the shock upstream.
+    dw_shk : 'datetime'
+        Beginning of the shock downstream.
+    min_up_dur : 'timedelta'
+        Duration of the smallest upstream averaging window
+    max_up_dur : 'timedelta'
+        Duration of the largest upstream averaging window
+    min_dw_dur : 'timedelta'
+        Duration of the smallest downstream averaging window.
+    max_dw_dur : 'timedelta'
+        Duration of the largest downstream averaging window.
+    tcad : 'timedelta'
+        Time cadence at which windows are enlarged.
+    frame : 'str'
+        Frame in which the calculation is done. implemented: 'RTN', 'GSE'
+    method : 'str', optional
+        Method by which different windows are considered. The default is 'cross'.
+
+    Returns
+    -------
+    B_vec_up : 'numpy array'
+        Upstream B vectors for all windows.
+    B_vec_down : 'numpy array'
+        Downstream B vectors for all windows.
+    V_vec_up : 'numpy array'
+        Upstream V vectors for all windows.
+    V_vec_down : 'numpy array'
+        Downstream V vectors for all windows.
+    n_up : 'numpy array'
+        Upstream number density for all windows.
+    n_down : 'numpy array'
+        Downstream number density for all windows.
+    """
+    
+    tuf = shock_time - up_shk # Duration. Start of upstream
+    tu1 = tuf + min_up_dur    # Duration of first window
+    tu2 = tuf + max_up_dur    # Duration of last window 
+    sldu = int(np.floor((tu2-tu1)/tcad)) 
+    
+    tdi = dw_shk - shock_time  # Duration. Start of downstream 
+    td1 = tdi + min_dw_dur     # Duration of first window
+    td2 = tdi + max_dw_dur     # Duration of last window 
+    sldd = int(np.floor((td2-td1)/tcad))
+    #disp([sldu,sldd]) 
+    iw = 0
+    
+    B_vec_up = np.zeros([sldu*sldd,3])
+    B_vec_down = np.zeros([sldu*sldd,3])
+    V_vec_up = np.zeros([sldu*sldd,3])
+    V_vec_down = np.zeros([sldu*sldd,3])
+    n_up = np.zeros(sldu*sldd)
+    n_down = np.zeros(sldu*sldd)
+    beta_up = np.zeros(sldu*sldd)
+    beta_down = np.zeros(sldu*sldd)
+    
+    counter = 0
+    for i in range(sldu):
+        stut = shock_time- (tu1 + (i)*tcad)
+        enut = shock_time - tuf
+        Bitsu, Biteu = get_time_indices(stut, enut, tB)
+        tsb, sBu     = select_subS(B, tB, Bitsu, Biteu, 3)
+
+        Vitsu, Viteu = get_time_indices(stut, enut, tV)
+        tsv, sVu     = select_subS(V, tV, Vitsu, Viteu, 3)
+        
+        nitsu, niteu = get_time_indices(stut, enut, tn)
+        tsn, snu     = select_subS(n, tn, nitsu, niteu, 1)
+        
+        betaitsu, betaiteu = get_time_indices(stut, enut, tbeta)
+        tsbeta, sbetau     = select_subS(beta, tbeta, betaitsu, betaiteu, 1)
+
+
+        Bu = np.nanmean(sBu,axis=0)
+        Vu = np.nanmean(sVu,axis=0)
+        nu = np.nanmean(snu)
+        betau = np.nanmean(sbetau)
+        
+        for j in range(sldd):
+            stdt = shock_time + tdi 
+            endt = shock_time + (td1 + (j)*tcad)
+            
+            Bitsd, Bited = get_time_indices(stdt, endt, tB)
+            tsb, sBd     = select_subS(B, tB, Bitsd, Bited, 3)
+            Vitsd, Vited = get_time_indices(stdt, endt, tV)
+            tsv, sVd     = select_subS(V, tV, Vitsd, Vited, 3)
+            nitsd, nited = get_time_indices(stdt, endt, tn)
+            tsn, snd     = select_subS(n, tn, nitsd, nited, 1)
+            betaitsd, betaited = get_time_indices(stdt, endt, tbeta)
+            tsbeta, sbetad     = select_subS(beta, tbeta, betaitsd, betaited, 1)
+
+            Bd = np.nanmean(sBd,axis=0)
+            Vd = np.nanmean(sVd,axis=0)
+            nd = np.nanmean(snd)
+            betad = np.nanmean(sbetad) 
+            
+            iw = iw +1
+            
+            B_vec_up[counter,:] = Bu
+            B_vec_down[counter,:] = Bd
+            V_vec_up[counter,:] = Vu
+            V_vec_down[counter,:] = Vd
+            n_up[counter] = nu
+            n_down[counter] = nd
+            beta_up[counter] = betau
+            beta_down[counter] = betad
+            counter = counter + 1
+
+        print('Upstream windows = ' + str(i) + ' / ' + str(sldu))
+        
+    
+    return B_vec_up, B_vec_down, V_vec_up, V_vec_down, n_up, n_down, beta_up, beta_down
