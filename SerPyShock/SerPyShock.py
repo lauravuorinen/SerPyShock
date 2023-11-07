@@ -265,7 +265,114 @@ def calc_MX3(Bu,Bd,Vu, Vd,frame):
         
     return n,tbn
 
+def MC_stats(tB, B, shock_time, up_shk, dw_shk, min_up_dur, max_up_dur, min_dw_dur, max_dw_dur, tcad, frame, method='cross'):
 
+    """
+    Routine computing shock normal vector, theta_bn and magnetic compression ratio 
+    for an ensemble of upstream/downstream averaging windows, that are systematically changed.
+    Only uses the magnetic coplanarity technique, which works on magnetic field data alone.
+    
+    Parameters
+    ----------
+    tB : 'DatetimeIndex'
+        Stream of times for magnetic field measurements.
+    B : 'numpy array'
+        Magnetic field measurements with n_timestamps x 3 dimensions.
+    shock_time : 'datetime'
+        Time of the shock crossing
+    up_shk : 'datetime'
+        Beginning of the shock upstream.
+    dw_shk : 'datetime'
+        Beginning of the shock downstream.
+    min_up_dur : 'timedelta'
+        Duration of the smallest upstream averaging window
+    max_up_dur : 'timedelta'
+        Duration of the largest upstream averaging window
+    min_dw_dur : 'timedelta'
+        Duration of the smallest downstream averaging window.
+    max_dw_dur : 'timedelta'
+        Duration of the largest downstream averaging window.
+    tcad : 'timedelta'
+        Time cadence at which windows are enlarged.
+    frame : 'str'
+        Frame in which the calculation is done. implemented: 'RTN', 'GSE'
+    method : 'str', optional
+        Method by which different windows are considered. The default is 'cross'.
+
+    Returns
+    -------
+    n : 'ShockParameters'
+        Object with one attribute per technique (MC).
+        Each attribute is an array of shock normal vectors with dimensions
+        n_windows_combination x 3
+    tbn : 'ShockParameters'
+        Object with one attribute per technique (MC).
+        Each attribute is an array of shock normal vectors with dimensions
+        n_windows_combination x 3
+    rB : 'numpy array'
+        Array containing magnetic compression ratio computed per each window choice
+    ex : 'ShockParameters'
+        Values of thetabn and magnetic compression ratio obtained witht the 
+        smallest and largest possible choice of upstream/downstream windows.
+    """
+    n   = ShockParameters()
+    tbn = ShockParameters()
+    rB  = ShockParameters()
+    ex  = ShockParameters()
+    
+    tuf = shock_time - up_shk # Duration. Start of upstream
+    tu1 = tuf + min_up_dur    # Duration of first window
+    tu2 = tuf + max_up_dur    # Duration of last window 
+    sldu = int(np.floor((tu2-tu1)/tcad)) 
+    
+    tdi = dw_shk - shock_time  # Duration. Start of downstream 
+    td1 = tdi + min_dw_dur     # Duration of first window
+    td2 = tdi + max_dw_dur     # Duration of last window 
+    sldd = int(np.floor((td2-td1)/tcad))
+    #disp([sldu,sldd]) 
+    iw = 0
+    
+    n.MC   = np.zeros([sldu*sldd,3])
+    tbn.MC = np.zeros([sldu*sldd,1])
+    rB     = np.zeros([sldu*sldd,1]) 
+    ex.tbn_susd = []
+    ex.rB_susd = []
+    ex.tbn_luld = []
+    ex.rB_luld = []
+    for i in range(sldu):
+        stut = shock_time- (tu1 + (i)*tcad)
+        enut = shock_time - tuf
+        Bitsu, Biteu = get_time_indices(stut, enut, tB)
+        tsb, sBu     = select_subS(B, tB, Bitsu, Biteu, 3)
+
+        Bu = np.nanmean(sBu,axis=0)
+        
+        for j in range(sldd):
+            stdt = shock_time + tdi 
+            endt = shock_time + (td1 + (j)*tcad)
+            
+            Bitsd, Bited = get_time_indices(stdt, endt, tB)
+            tsb, sBd     = select_subS(B, tB, Bitsd, Bited, 3)
+
+            Bd = np.nanmean(sBd,axis=0)
+            
+            rB[iw] = np.linalg.norm(Bd)/np.linalg.norm(Bu)
+                           
+            n.MC[iw,:], tbn.MC[iw] = calc_MC(Bu,Bd,frame)  
+            
+            #Special cases
+            if (i == 0 and j == 0):
+                ex.tbn_susd = tbn.MC[iw]  # Smallest Upstream Smallest Downstream
+                ex.rB_susd  = rB[iw]   # Smallest Upstream Smallest Downstream
+
+            iw = iw +1
+
+        print('Upstream windows = ' + str(i+1) + ' / ' + str(sldu), end='\r')
+        
+    ex.tbn_luld = tbn.MC[iw-1]  # Smallest Upstream Smallest Downstream
+    ex.rB_luld  = rB[iw-1]   # Smallest Upstream Smallest Downstream
+    
+    return n, tbn, rB, ex
 
 
 def MX_stats(tB, B, tV, V, shock_time, up_shk, dw_shk, min_up_dur, max_up_dur, min_dw_dur, max_dw_dur, tcad, frame, method='cross'):
@@ -867,6 +974,10 @@ def all_parameters(tB, B, tV, V, tn, n, tbeta, beta, shock_time, up_shk, dw_shk,
     n_down = np.zeros(sldu*sldd)
     beta_up = np.zeros(sldu*sldd)
     beta_down = np.zeros(sldu*sldd)
+    start_t_up = np.zeros(sldu*sldd)
+    start_t_down = np.zeros(sldu*sldd)
+    end_t_up = np.zeros(sldu*sldd)
+    end_t_down = np.zeros(sldu*sldd)
     
     counter = 0
     for i in range(sldu):
@@ -918,9 +1029,333 @@ def all_parameters(tB, B, tV, V, tn, n, tbeta, beta, shock_time, up_shk, dw_shk,
             n_down[counter] = nd
             beta_up[counter] = betau
             beta_down[counter] = betad
+            start_t_up[counter]
+            start_t_down[counter]
+            end_t_up[counter]
+            end_t_down[counter]
             counter = counter + 1
 
-        print('Upstream windows = ' + str(i) + ' / ' + str(sldu))
+        print('Upstream windows = ' + str(i+1) + ' / ' + str(sldu), end='\r')
         
     
     return B_vec_up, B_vec_down, V_vec_up, V_vec_down, n_up, n_down, beta_up, beta_down
+
+def window_limits(shock_time, up_shk, dw_shk, min_up_dur, max_up_dur, min_dw_dur, max_dw_dur, tcad):
+    """
+    Routine computing an ensemble of upstream/downstream averaging windows, that are systematically changed.
+    Similar technique is applied in other methods. This method is used to access the information about
+    the window start and end times.
+    
+    Parameters
+    ----------
+    shock_time : 'datetime'
+        Time of the shock crossing
+    up_shk : 'datetime'
+        Beginning of the shock upstream.
+    dw_shk : 'datetime'
+        Beginning of the shock downstream.
+    min_up_dur : 'timedelta'
+        Duration of the smallest upstream averaging window
+    max_up_dur : 'timedelta'
+        Duration of the largest upstream averaging window
+    min_dw_dur : 'timedelta'
+        Duration of the smallest downstream averaging window.
+    max_dw_dur : 'timedelta'
+        Duration of the largest downstream averaging window.
+    tcad : 'timedelta'
+        Time cadence at which windows are enlarged.
+
+    Returns
+    -------
+    start_t_up : 'numpy array'
+        Upstream window starting times.
+    end_t_up : 'numpy array'
+        Upstream window ending times.
+    start_t_down : 'numpy array'
+        Downstream window starting times.
+    end_t_down : 'numpy array'
+        Downstream window ending times.
+    """
+    
+    tuf = shock_time - up_shk # Duration. Start of upstream
+    tu1 = tuf + min_up_dur    # Duration of first window
+    tu2 = tuf + max_up_dur    # Duration of last window 
+    sldu = int(np.floor((tu2-tu1)/tcad)) 
+    
+    tdi = dw_shk - shock_time  # Duration. Start of downstream 
+    td1 = tdi + min_dw_dur     # Duration of first window
+    td2 = tdi + max_dw_dur     # Duration of last window 
+    sldd = int(np.floor((td2-td1)/tcad))
+    iw = 0
+    
+    start_t_up = np.zeros(sldu*sldd)
+    start_t_down = np.zeros(sldu*sldd)
+    end_t_up = np.zeros(sldu*sldd)
+    end_t_down = np.zeros(sldu*sldd)
+    
+    counter = 0
+    for i in range(sldu):
+        stut = shock_time- (tu1 + (i)*tcad)
+        enut = shock_time - tuf
+        
+        for j in range(sldd):
+            stdt = shock_time + tdi 
+            endt = shock_time + (td1 + (j)*tcad)
+            
+            iw = iw +1
+            
+            start_t_up[counter] = stut
+            start_t_down[counter] = stdt
+            end_t_up[counter] = enut
+            end_t_down[counter] = endt
+            counter = counter + 1
+
+        print('Upstream windows = ' + str(i+1) + ' / ' + str(sldu), end='\r')
+    
+    return start_t_up, end_t_up, start_t_down, end_t_down
+
+
+def up_down_averages(times, data, shock_time, up_shk, dw_shk, min_up_dur, max_up_dur, min_dw_dur, max_dw_dur, tcad):
+    """
+    Routine computing averages of data for an ensemble of upstream/downstream averaging windows, that are systematically changed.
+    This methods returns the averages for each pair of upstream and downstream windows so that these parameters
+    remain connected to each other.
+    
+    Parameters
+    ----------
+    times : 'DatetimeIndex'
+        Stream of times for the measurements.
+    data : 'numpy array'
+        Measurements with n_timestamps x n dimensions.
+    shock_time : 'datetime'
+        Time of the shock crossing
+    up_shk : 'datetime'
+        Beginning of the shock upstream.
+    dw_shk : 'datetime'
+        Beginning of the shock downstream.
+    min_up_dur : 'timedelta'
+        Duration of the smallest upstream averaging window
+    max_up_dur : 'timedelta'
+        Duration of the largest upstream averaging window
+    min_dw_dur : 'timedelta'
+        Duration of the smallest downstream averaging window.
+    max_dw_dur : 'timedelta'
+        Duration of the largest downstream averaging window.
+    tcad : 'timedelta'
+        Time cadence at which windows are enlarged.
+
+    Returns
+    -------
+    avg_up : 'numpy array'
+        Upstream averages for all windows.
+    avg_down : 'numpy array'
+        Downstream averages for all windows.
+    """
+    
+    tuf = shock_time - up_shk # Duration. Start of upstream
+    tu1 = tuf + min_up_dur    # Duration of first window
+    tu2 = tuf + max_up_dur    # Duration of last window 
+    sldu = int(np.floor((tu2-tu1)/tcad)) 
+    
+    tdi = dw_shk - shock_time  # Duration. Start of downstream 
+    td1 = tdi + min_dw_dur     # Duration of first window
+    td2 = tdi + max_dw_dur     # Duration of last window 
+    sldd = int(np.floor((td2-td1)/tcad))
+    iw = 0
+    
+    n_dims = data.ndim
+    if n_dims == 0:
+        raise Exception("Data dimension 0.")
+    elif n_dims == 1:
+        n_components = 1
+    elif n_dims == 2:
+        n_components = np.shape(data)[1]
+    else:
+        raise Exception("Data dimension > 2.")
+    
+    avg_up = np.zeros([sldu*sldd,n_components])
+    avg_down = np.zeros([sldu*sldd,n_components])
+    start_t_up = np.zeros(sldu*sldd)
+    start_t_down = np.zeros(sldu*sldd)
+    end_t_up = np.zeros(sldu*sldd)
+    end_t_down = np.zeros(sldu*sldd)
+    
+    counter = 0
+    for i in range(sldu):
+        stut = shock_time- (tu1 + (i)*tcad)
+        enut = shock_time - tuf
+        Bitsu, Biteu = get_time_indices(stut, enut, times)
+        tsb, sBu     = select_subS(data, times, Bitsu, Biteu, n_components)
+
+        Bu = np.nanmean(sBu,axis=0)
+        
+        for j in range(sldd):
+            stdt = shock_time + tdi 
+            endt = shock_time + (td1 + (j)*tcad)
+            
+            Bitsd, Bited = get_time_indices(stdt, endt, times)
+            tsb, sBd     = select_subS(data, times, Bitsd, Bited, n_components)
+
+            Bd = np.nanmean(sBd,axis=0)
+            iw = iw +1
+            
+            avg_up[counter,:] = Bu
+            avg_down[counter,:] = Bd
+#             start_t_up[counter] = stut
+#             start_t_down[counter] = stdt
+#             end_t_up[counter] = enut
+#             end_t_down[counter] = endt
+            counter = counter + 1
+
+        print('Upstream windows = ' + str(i+1) + ' / ' + str(sldu), end='\r')
+        
+    
+    return avg_up, avg_down
+
+
+def Vsh_stats2(n, tP, V, Rho, shock_time, up_shk, dw_shk, min_up_dur, max_up_dur, min_dw_dur, max_dw_dur, tcad, method='cross'):
+    """
+    Routine that computes shock speed along the shock normal direction for an ensemble
+    of upstream/downstream averaging windows, that are systematically changed.
+
+    Parameters
+    ----------
+    n : 'numpy array' or 'ShockParameters'
+        Shock normal vector or an object containing all shock normals from MX_stats.
+    tP : 'DatetimeIndex'
+        Stream of times for plasma measurements.
+    V : 'numpy array'
+        Bulk flow speed measurements with dimensions n_timestamps x 3.
+    Rho : 'numpy array'
+        Plasma density measurements with n_timestamps x 3 dimensions.
+    shock_time : 'datetime'
+        Time of the shock crossing
+    up_shk : 'datetime'
+        Beginning of the shock upstream.
+    dw_shk : 'datetime'
+        Beginning of the shock downstream.
+    min_up_dur : 'timedelta'
+        Duration of the smallest upstream averaging window
+    max_up_dur : 'timedelta'
+        Duration of the largest upstream averaging window
+    min_dw_dur : 'timedelta'
+        Duration of the smallest downstream averaging window.
+    max_dw_dur : 'timedelta'
+        Duration of the largest downstream averaging window.
+    tcad : 'timedelta'
+        Time cadence at which windows are enlarged.
+    frame : 'str'
+        Frame in which the calculation is done. implemented: 'RTN', 'GSE'
+    method : 'str', optional
+        Method by which different windows are considered. The default is 'cross'.
+        
+    Returns
+    -------
+    vsh : 'numpy array'
+        Array containing shock speed computed per each window choice and shock normal.
+    ex : 'ShockParameters'
+        Object containing values of shock speed obtained with the 
+        smallest and largest possible choice of upstream/downstream windows.
+    """
+    vsh  = ShockParameters()
+    ex  = ShockParameters()
+    
+    tuf = shock_time - up_shk # Duration. Start of upstream
+    tu1 = tuf + min_up_dur    # Duration of first window
+    tu2 = tuf + max_up_dur    # Duration of last window 
+    sldu = int(np.floor((tu2-tu1)/tcad)) 
+    
+    tdi = dw_shk - shock_time  # Duration. Start of downstream 
+    td1 = tdi + min_dw_dur     # Duration of first window
+    td2 = tdi + max_dw_dur     # Duration of last window 
+    sldd = int(np.floor((td2-td1)/tcad))
+    #disp([sldu,sldd]) 
+    iw = 0
+    
+    if isinstance(n, ShockParameters):
+        vsh.MC   = np.zeros([sldu*sldd,1])
+        if hasattr(n, 'MX1'):
+            vsh.MX1  = np.zeros([sldu*sldd,1])
+            vsh.MX2  = np.zeros([sldu*sldd,1])
+            vsh.MX3  = np.zeros([sldu*sldd,1])
+        ex.vsh_min = []
+        ex.vsh_max = []
+    else:
+        vsh   = np.zeros([sldu*sldd,1])
+        ex.vsh_min = []
+        ex.vsh_max = []
+    
+    for i in range(sldu):
+        stut = shock_time- (tu1 + (i)*tcad)
+        enut = shock_time - tuf
+        #Bitsu, Biteu = get_time_indices(stut, enut, tB)
+        #tsb, sBu     = select_subS(B, tB, Bitsu, Biteu, 3)
+
+        Vitsu, Viteu   = get_time_indices(stut, enut, tP)
+        tsv, sVu       = select_subS(V, tP, Vitsu, Viteu, 3)
+        tsr, sRhou     = select_subS(Rho, tP, Vitsu, Viteu, 1)
+
+        Rhou = np.nanmean(sRhou,axis=0)
+        Vu = np.nanmean(sVu,axis=0)   
+        
+        
+        for j in range(sldd):
+            stdt = shock_time + tdi 
+            endt = shock_time + (td1 + (j)*tcad)
+            
+            Vitsd, Vited   = get_time_indices(stdt, endt, tP)
+            tsv, sVd       = select_subS(V, tP, Vitsd, Vited, 3)
+            tsr, sRhod     = select_subS(Rho, tP, Vitsd, Vited, 1)
+            
+            Rhod = np.nanmean(sRhod,axis=0)
+            Vd = np.nanmean(sVd,axis=0)   
+            
+            DRHO = Rhod - Rhou;
+            if isinstance(n, ShockParameters):
+                for normal in n.MC:
+                    rdVdn  = Rhod*np.dot(Vd,normal)
+                    ruVun  = Rhou*np.dot(Vu,normal)         
+                    vsh.MC[iw]  = (rdVdn - ruVun)/DRHO
+                if hasattr(n, 'MX1'):
+                    for normal in n.MX1:
+                        rdVdn  = Rhod*np.dot(Vd,normal)
+                        ruVun  = Rhou*np.dot(Vu,normal)         
+                        vsh.MX1[iw]  = (rdVdn - ruVun)/DRHO
+                    for normal in n.MX2:
+                        rdVdn  = Rhod*np.dot(Vd,normal)
+                        ruVun  = Rhou*np.dot(Vu,normal)         
+                        vsh.MX2[iw]  = (rdVdn - ruVun)/DRHO
+                    for normal in n.MX3:
+                        rdVdn  = Rhod*np.dot(Vd,normal)
+                        ruVun  = Rhou*np.dot(Vu,normal)         
+                        vsh.MX3[iw]  = (rdVdn - ruVun)/DRHO
+                ex.vsh_min = []
+                ex.vsh_max = []
+            else:
+                rdVdn  = Rhod*np.dot(Vd,n)
+                ruVun  = Rhou*np.dot(Vu,n)            
+                vsh[iw]  = (rdVdn - ruVun)/DRHO
+            
+            #Special cases
+            if (i == 0 and j == 0):
+                if isinstance(n, ShockParameters):
+                    if hasattr(n, 'MX1'):
+                        ex.vshmin = vsh.MX3[iw]
+                    else:
+                        ex.vshmin = vsh.MC[iw]
+                else:
+                    ex.vshmin = vsh[iw]  # Smallest Upstream Smallest Downstream
+                
+            iw = iw +1
+
+        print('Upstream windows = ' + str(i+1) + ' / ' + str(sldu), end='\r')
+    
+    if isinstance(n, ShockParameters):
+        if hasattr(n, 'MX1'):
+            ex.vshmax = vsh.MX3[iw-1]
+        else:
+            ex.vshmax = vsh.MC[iw-1]
+    else:
+        ex.vshmax = vsh[iw-1]  # Smallest Upstream Smallest Downstream
+    
+    return vsh, ex
